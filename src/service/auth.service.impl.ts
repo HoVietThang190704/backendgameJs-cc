@@ -7,6 +7,8 @@ import bcrypt from 'bcrypt';
 import { JwtService } from './jwt.service';
 import { redisClient } from '../lib/redis';
 
+type UserWithId = User & { _id?: { toString(): string } };
+
 export class AuthService implements IAuthService {
   private readonly userService: IUserService;
 
@@ -30,7 +32,11 @@ export class AuthService implements IAuthService {
       throw new Error('Invalid email or password');
     }
 
+    const existingUserWithId = existingUser as UserWithId;
+    const userId = existingUserWithId._id?.toString?.() || existingUser.email;
+
     const jwtPayLoad = {
+      userId,
       email: existingUser.email,
       rule: existingUser.rule,
       sub: existingUser.email
@@ -59,8 +65,10 @@ export class AuthService implements IAuthService {
       throw new Error('Invalid refresh token');
     }
 
-    const tokenPayload = decoded as { email?: string; sub?: string; rule?: string };
+    const tokenPayload = decoded as { userId?: string; email?: string; sub?: string; rule?: string };
     const email = tokenPayload.email || tokenPayload.sub;
+    const userId = tokenPayload.userId;
+
     if (!email) {
       throw new Error('Invalid refresh token');
     }
@@ -76,7 +84,9 @@ export class AuthService implements IAuthService {
       throw new Error('User not found');
     }
 
+    const existingUserWithId = existingUser as UserWithId;
     const jwtPayLoad = {
+      userId: existingUserWithId._id?.toString(),
       email: existingUser.email,
       rule: existingUser.rule,
       sub: existingUser.email
@@ -93,5 +103,28 @@ export class AuthService implements IAuthService {
     }
 
     return { accessToken: newAccessToken, refreshToken: newRefreshToken };
+  }
+
+  async logout(refreshToken: string): Promise<void> {
+    const jwtService = JwtService.getInstance();
+    const decoded = await jwtService.verifyRefreshToken(refreshToken);
+
+    if (!decoded || typeof decoded !== "object") {
+      throw new Error('Invalid refresh token');
+    }
+
+    const tokenPayload = decoded as { email?: string; sub?: string };
+    const email = tokenPayload.email || tokenPayload.sub;
+    if (!email) {
+      throw new Error('Invalid refresh token');
+    }
+
+    const refreshKey = `refresh_token:${email}`;
+    const storedToken = await redisClient.get(refreshKey);
+    if (!storedToken || storedToken !== refreshToken) {
+      throw new Error('Invalid refresh token');
+    }
+
+    await redisClient.del(refreshKey);
   }
 }
