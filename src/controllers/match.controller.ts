@@ -3,6 +3,7 @@ import { IMatchService } from "../service/match.service.interface";
 import { IWaitingQueueService } from "../service/waitingQueue.service.interface";
 import { MatchDocument } from "../model/match";
 import { WaitingQueueDocument } from "../model/waitingQueue";
+import { MatchDocument } from "../model/match";
 import { MatchPlayer } from "../socket/types";
 import { BaseResponse } from "../lib/baseresponse";
 import { SocketService } from "../socket/socket.service";
