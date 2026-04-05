@@ -6,6 +6,8 @@ import { MatchDocument, MatchInput } from "../model/match";
 
 const DEFAULT_GAME_BOARD = { rows: 10, cols: 10, bombs: 20 };
 const DEFAULT_TURN_TIME_LIMIT = 30;
+const WIN_ELO_DELTA = 20;
+const LOSE_ELO_DELTA = -10;
 
 type BombCoordinate = {
   x: number;
@@ -82,6 +84,10 @@ export class MatchService implements IMatchService {
     return this.matchRepository.findMatchById(matchId);
   }
 
+  async getMatchHistory(userId: string, page: number, limit: number): Promise<MatchDocument[]> {
+    return this.matchRepository.findFinishedMatchesByUserId(userId, page, limit);
+  }
+
   async addPlayerToMatch(matchId: string, userId: string): Promise<MatchDocument | null> {
     const match = await this.getMatchById(matchId);
     if (!match) {
@@ -129,10 +135,10 @@ export class MatchService implements IMatchService {
       const basePlayer = typeof (p as { toObject?: () => unknown }).toObject === "function"
         ? (p as { toObject: () => { userId: Types.ObjectId; isReady: boolean; health: number; _id?: Types.ObjectId } }).toObject()
         : {
-          userId: p.userId,
-          isReady: p.isReady,
-          health: p.health,
-        };
+            userId: p.userId,
+            isReady: p.isReady,
+            health: p.health,
+          };
 
       return {
         ...basePlayer,
@@ -267,7 +273,7 @@ export class MatchService implements IMatchService {
     );
   }
 
-  async finalizeMatch(matchId: string, winnerId: string): Promise<{ winnerEloDelta: number; loserEloDelta: number }> {
+  async finalizeMatch(matchId: string, winnerId: string, loserId: string): Promise<{ winnerEloDelta: number; loserEloDelta: number }> {
     const match = await this.getMatchById(matchId);
     if (!match) {
       throw new Error("Match not found");
@@ -281,13 +287,18 @@ export class MatchService implements IMatchService {
         currentTurn: undefined,
         turnStartTime: undefined,
       });
+
+      await Promise.all([
+        this.userService.applyGameResult(winnerId, WIN_ELO_DELTA, true),
+        this.userService.applyGameResult(loserId, LOSE_ELO_DELTA, false),
+      ]);
     }
 
     await this.clearCurrentMatchForPlayers(matchId);
 
     return {
-      winnerEloDelta: 0,
-      loserEloDelta: 0,
+      winnerEloDelta: WIN_ELO_DELTA,
+      loserEloDelta: LOSE_ELO_DELTA,
     };
   }
 
@@ -303,9 +314,11 @@ export class MatchService implements IMatchService {
     }
 
     const remainingPlayers = match.players.filter((p) => p.userId.toString() !== userId);
+
     await this.userService.setCurrentMatch(userId, null);
 
     if (remainingPlayers.length === 0) {
+      await this.userService.setCurrentMatch(userId, null);
       await this.matchRepository.deleteMatch(matchId);
       return null;
     }

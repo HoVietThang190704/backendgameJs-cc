@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { IMatchService } from "../service/match.service.interface";
 import { IMatchStateService } from "../service/match-state.service.interface";
+import { IMatchHistoryService } from "../service/match-history.service.interface";
 import { MatchDocument } from "../model/match";
 import { MatchPlayer } from "../socket/types";
 import { BaseResponse } from "../lib/baseresponse";
@@ -11,15 +12,18 @@ export class MatchController {
   private readonly matchService: IMatchService;
   private readonly socketService: SocketService;
   private readonly matchStateService: IMatchStateService;
+  private readonly matchHistoryService: IMatchHistoryService;
 
   constructor(
     matchService: IMatchService,
     socketService: SocketService,
     matchStateService: IMatchStateService,
+    matchHistoryService: IMatchHistoryService,
   ) {
     this.matchService = matchService;
     this.socketService = socketService;
     this.matchStateService = matchStateService;
+    this.matchHistoryService = matchHistoryService;
   }
 
   async createPrivateMatch(req: Request, res: Response): Promise<void> {
@@ -117,6 +121,34 @@ export class MatchController {
     }
   }
 
+  async getMatchHistory(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.userId;
+      if (!userId) {
+        res.status(401).json({ message: "Unauthorized" });
+        return;
+      }
+
+      const page = Number(req.query.page) >= 1 ? Number(req.query.page) : 1;
+      const limit = Number(req.query.limit) >= 1 && Number(req.query.limit) <= 20 ? Number(req.query.limit) : 10;
+
+      const matches = await this.matchService.getMatchHistory(userId, page, limit);
+      const history = this.matchHistoryService.buildMatchHistoryItems(matches, userId);
+
+      const response = new BaseResponse<typeof history>()
+        .setResponse(200)
+        .setMessage("Match history fetched")
+        .setSuccess(true)
+        .setData(history)
+        .build();
+
+      res.status(200).json(response);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unable to get match history";
+      res.status(400).json({ message });
+    }
+  }
+
   async getActiveMatch(req: Request, res: Response): Promise<void> {
     try {
       const userId = req.userId;
@@ -128,17 +160,17 @@ export class MatchController {
       const activeMatch = await this.matchService.getActiveMatchForUser(userId);
       const data = activeMatch
         ? {
-          matchId: activeMatch._id?.toString() ?? null,
-          status: activeMatch.status,
-          currentPlayerId: activeMatch.currentTurn?.toString() ?? null,
-          playerCount: activeMatch.players.length,
-        }
+            matchId: activeMatch._id?.toString() ?? null,
+            status: activeMatch.status,
+            currentPlayerId: activeMatch.currentTurn?.toString() ?? null,
+            playerCount: activeMatch.players.length,
+          }
         : {
-          matchId: null,
-          status: "none",
-          currentPlayerId: null,
-          playerCount: 0,
-        };
+            matchId: null,
+            status: "none",
+            currentPlayerId: null,
+            playerCount: 0,
+          };
 
       const response = new BaseResponse<typeof data>()
         .setResponse(200)
