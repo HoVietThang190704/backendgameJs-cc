@@ -17,8 +17,24 @@ export const matchSchema = new Schema({
     cols: { type: Number, required: true },
     bombs: { type: Number, required: true },
   },
+  player1Bombs: [
+    {
+      x: { type: Number, required: true },
+      y: { type: Number, required: true },
+    },
+  ],
+  player2Bombs: [
+    {
+      x: { type: Number, required: true },
+      y: { type: Number, required: true },
+    },
+  ],
   turnTimeLimit: { type: Number, required: true, default: 30 },
+  turnStartTime: { type: Date, required: false },
   currentTurn: { type: Schema.Types.ObjectId, ref: "User", required: false },
+  winnerId: { type: Schema.Types.ObjectId, ref: "User", required: false },
+  startedAt: { type: Date, required: false },
+  finishedAt: { type: Date, required: false },
   moves: [
     {
       playerId: { type: Schema.Types.ObjectId, ref: "User", required: true },
@@ -26,6 +42,13 @@ export const matchSchema = new Schema({
       y: { type: Number, required: true },
       action: { type: String, required: true },
       result: { type: String, required: true },
+      revealedCells: [
+        {
+          x: { type: Number, required: true },
+          y: { type: Number, required: true },
+          adjacentMines: { type: Number, required: true },
+        },
+      ],
       createdAt: { type: Date, default: Date.now }
     }
   ],
@@ -52,14 +75,31 @@ export type MatchInput = {
     cols: number;
     bombs: number;
   };
+  player1Bombs?: Array<{
+    x: number;
+    y: number;
+  }>;
+  player2Bombs?: Array<{
+    x: number;
+    y: number;
+  }>;
   turnTimeLimit: number;
   currentTurn?: Types.ObjectId;
+  winnerId?: Types.ObjectId;
+  startedAt?: Date;
+  finishedAt?: Date;
+  turnStartTime?: Date;
   moves?: Array<{
     playerId: Types.ObjectId;
     x: number;
     y: number;
     action: string;
     result: string;
+    revealedCells?: Array<{
+      x: number;
+      y: number;
+      adjacentMines: number;
+    }>;
     createdAt?: Date;
   }>;
   lastTickAt?: Date;

@@ -6,11 +6,15 @@ import { UserRepository } from '../../repository/user.repository.impl';
 import { IMatchRepository } from '../../repository/match.repository.interface';
 import { IUserRepository } from '../../repository/user.repository.interface';
 import { MatchService } from '../../service/match.service.impl';
+import { MatchStateService } from '../../service/match-state.service.impl';
+import { GameLogicService } from '../../service/game-logic.service.impl';
 import { UserService } from '../../service/user.service.impl';
 import { AuthService } from '../../service/auth.service.impl';
 import { IMatchService } from '../../service/match.service.interface';
+import { IMatchStateService } from '../../service/match-state.service.interface';
 import { IUserService } from '../../service/user.service.interface';
 import { IAuthService } from '../../service/auth.service.interface';
+import SocketService from '../../socket/socket.service';
 
 class Container {
   private static instance: Container;
@@ -35,6 +39,12 @@ class Container {
     const matchService: IMatchService = new MatchService(matchRepository, userService);
     this.services.set('MatchService', matchService);
 
+    const gameLogicService = new GameLogicService(matchRepository, matchService);
+    this.services.set('GameLogicService', gameLogicService);
+
+    const matchStateService: IMatchStateService = new MatchStateService(userService);
+    this.services.set('MatchStateService', matchStateService);
+
     const authService: IAuthService = new AuthService(userService);
     this.services.set('AuthService', authService);
 
@@ -45,7 +55,10 @@ class Container {
     const userControllerInstance = new UserController(userService);
     this.services.set('UserController', userControllerInstance);
 
-    const matchController = new MatchController(matchService);
+    const socketService = SocketService.getInstance();
+    this.services.set('SocketService', socketService);
+
+    const matchController = new MatchController(matchService, socketService, matchStateService);
     this.services.set('MatchController', matchController);
   }
 
