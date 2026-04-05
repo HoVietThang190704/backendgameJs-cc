@@ -33,6 +33,8 @@ export function createUserRoutes(userController: UserController): Router {
      *         description: Internal server error
      */
     router.get('/profile', authMiddleware, (req, res) => userController.getProfile(req, res));
+    router.get('/search', authMiddleware, (req, res) => userController.searchUsers(req, res));
+    router.get('/leaderboard', authMiddleware, (req, res) => userController.getLeaderboard(req, res));
 
     return router;
 }

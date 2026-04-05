@@ -23,7 +23,6 @@ export class SocketService {
 
   emitToRoom(room: string, event: string, payload: unknown): void {
     if (!this.io) {
-      console.warn("Socket.io not initialized in SocketService");
       return;
     }
     this.io.to(room).emit(event, payload);

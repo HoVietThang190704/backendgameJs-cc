@@ -1,5 +1,12 @@
 import { Request, Response } from "express";
 import { IMatchService } from "../service/match.service.interface";
+import { IMatchStateService } from "../service/match-state.service.interface";
+import { IMatchHistoryService } from "../service/match-history.service.interface";
+import { MatchDocument } from "../model/match";
+import { MatchPlayer } from "../socket/types";
+import { BaseResponse } from "../lib/baseresponse";
+import { SocketService } from "../socket/socket.service";
+import { startGame, startMatchTimer } from "../socket/handlers";
 import { IUserService } from "../service/user.service.interface";
 import { IWaitingQueueService } from "../service/waitingQueue.service.interface";
 import { MatchDocument } from "../model/match";
@@ -12,12 +19,21 @@ import { matchTimers } from "../socket/state";
 export class MatchController {
   private readonly matchService: IMatchService;
   private readonly socketService: SocketService;
+  private readonly matchStateService: IMatchStateService;
+  private readonly matchHistoryService: IMatchHistoryService;
   private readonly waitingQueueService: IWaitingQueueService;
   private readonly userService: IUserService;
 
   constructor(
     matchService: IMatchService,
     socketService: SocketService,
+    matchStateService: IMatchStateService,
+    matchHistoryService: IMatchHistoryService,
+  ) {
+    this.matchService = matchService;
+    this.socketService = socketService;
+    this.matchStateService = matchStateService;
+    this.matchHistoryService = matchHistoryService;
     waitingQueueService: IWaitingQueueService,
     userService: IUserService
   ) {
@@ -106,68 +122,7 @@ export class MatchController {
         return;
       }
 
-      const playerState = await Promise.all(
-        match.players.map(async (p) => {
-          const user = await this.userService.getUserById(p.userId.toString());
-          const displayName = user?.name || user?.username || "Unknown";
-
-          return {
-            userId: p.userId.toString(),
-            displayName,
-            rank: user?.rank ?? 0,
-            health: p.health,
-          };
-        }),
-      );
-
-      const player1Id = match.players[0]?.userId?.toString();
-      const player2Id = match.players[1]?.userId?.toString();
-
-      const player1Revealed: Array<{ x: number; y: number }> = [];
-      const player2Revealed: Array<{ x: number; y: number }> = [];
-      const player1Flags: Array<{ x: number; y: number }> = [];
-      const player2Flags: Array<{ x: number; y: number }> = [];
-
-      (match.moves || []).forEach((move) => {
-        const coord = { x: move.x, y: move.y };
-        if (move.action === "open") {
-          if (move.playerId.toString() === player1Id) {
-            player1Revealed.push(coord);
-          } else if (move.playerId.toString() === player2Id) {
-            player2Revealed.push(coord);
-          }
-        } else if (move.action === "flag") {
-          if (move.playerId.toString() === player1Id) {
-            player1Flags.push(coord);
-          } else if (move.playerId.toString() === player2Id) {
-            player2Flags.push(coord);
-          }
-        }
-      });
-
-      const turnTimeLimit = match.turnTimeLimit ?? 30;
-      let turnStartTime = match.turnStartTime ?? null;
-      let remainingSeconds = null;
-
-      const timer = matchTimers.get(id);
-      if (timer) {
-        remainingSeconds = timer.remainingSeconds;
-        turnStartTime = new Date(Date.now() - (turnTimeLimit - remainingSeconds) * 1000);
-      }
-
-      const payload = {
-        players: playerState,
-        boardState: {
-          player1Revealed,
-          player2Revealed,
-          player1Flags,
-          player2Flags,
-        },
-        currentTurn: match.currentTurn?.toString() ?? null,
-        turnStartTime,
-        turnTimeLimit,
-        remainingSeconds,
-      };
+      const payload = await this.matchStateService.buildMatchStatePayload(match);
 
       const response = new BaseResponse<typeof payload>()
         .setResponse(200)
@@ -179,6 +134,71 @@ export class MatchController {
       res.status(200).json(response);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Unable to get match state";
+      res.status(400).json({ message });
+    }
+  }
+
+  async getMatchHistory(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.userId;
+      if (!userId) {
+        res.status(401).json({ message: "Unauthorized" });
+        return;
+      }
+
+      const page = Number(req.query.page) >= 1 ? Number(req.query.page) : 1;
+      const limit = Number(req.query.limit) >= 1 && Number(req.query.limit) <= 20 ? Number(req.query.limit) : 10;
+
+      const matches = await this.matchService.getMatchHistory(userId, page, limit);
+      const history = this.matchHistoryService.buildMatchHistoryItems(matches, userId);
+
+      const response = new BaseResponse<typeof history>()
+        .setResponse(200)
+        .setMessage("Match history fetched")
+        .setSuccess(true)
+        .setData(history)
+        .build();
+
+      res.status(200).json(response);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unable to get match history";
+      res.status(400).json({ message });
+    }
+  }
+
+  async getActiveMatch(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.userId;
+      if (!userId) {
+        res.status(401).json({ message: "Unauthorized" });
+        return;
+      }
+
+      const activeMatch = await this.matchService.getActiveMatchForUser(userId);
+      const data = activeMatch
+        ? {
+            matchId: activeMatch._id?.toString() ?? null,
+            status: activeMatch.status,
+            currentPlayerId: activeMatch.currentTurn?.toString() ?? null,
+            playerCount: activeMatch.players.length,
+          }
+        : {
+            matchId: null,
+            status: "none",
+            currentPlayerId: null,
+            playerCount: 0,
+          };
+
+      const response = new BaseResponse<typeof data>()
+        .setResponse(200)
+        .setMessage("Active match fetched")
+        .setSuccess(true)
+        .setData(data)
+        .build();
+
+      res.status(200).json(response);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unable to get active match";
       res.status(400).json({ message });
     }
   }
@@ -271,7 +291,6 @@ export class MatchController {
       if (bothReady && updatedMatch.status === "waiting") {
         const io = this.socketService.getIo();
         if (io) {
-          const { startGame } = require("../socket/handlers"); 
           await startGame(id, updatedMatch, io, this.matchService);
         }
       }
@@ -312,7 +331,6 @@ export class MatchController {
 
       const io = this.socketService.getIo();
       if (io) {
-        const { startMatchTimer } = require("../socket/handlers");
         io.to(matchId).emit("start_game", {
           matchId,
           currentTurn: startedMatch.currentTurn?.toString() ?? null,
@@ -337,70 +355,6 @@ export class MatchController {
         return;
       }
 
-      res.status(400).json({ message });
-    }
-  }
-
-  async findMatch(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = req.userId;
-      if (!userId) {
-        res.status(401).json({ message: "Unauthorized" });
-        return;
-      }
-
-      const { boardSize } = req.body;
-      if (!boardSize) {
-        res.status(400).json({ message: "boardSize is required" });
-        return;
-      }
-
-      const queueRecord = await this.waitingQueueService.addToQueue(userId, boardSize);
-
-      const response = new BaseResponse<WaitingQueueDocument>()
-        .setResponse(200)
-        .setMessage("Searching for opponent")
-        .setSuccess(true)
-        .setData(queueRecord)
-        .build();
-
-      res.status(200).json(response);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Unable to find match";
-      res.status(400).json({ message });
-    }
-  }
-
-  async cancelMatch(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = req.userId;
-      if (!userId) {
-        res.status(401).json({ message: "Unauthorized" });
-        return;
-      }
-
-      const cancelledQueue = await this.waitingQueueService.cancelFromQueue(userId);
-      if (!cancelledQueue) {
-        const response = new BaseResponse<null>()
-          .setResponse(200)
-          .setMessage("No active queue entry to cancel")
-          .setSuccess(false)
-          .build();
-
-        res.status(200).json(response);
-        return;
-      }
-
-      const response = new BaseResponse<WaitingQueueDocument>()
-        .setResponse(200)
-        .setMessage("Search cancelled")
-        .setSuccess(true)
-        .setData(cancelledQueue)
-        .build();
-
-      res.status(200).json(response);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Unable to cancel search";
       res.status(400).json({ message });
     }
   }

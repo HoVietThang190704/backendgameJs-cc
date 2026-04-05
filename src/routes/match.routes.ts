@@ -5,34 +5,13 @@ import { authMiddleware } from "../middleware/auth.middleware";
 export function createMatchRoutes(matchController: MatchController): Router {
   const router = Router();
 
-  /**
-   * @openapi
-   * /api/matches/create:
-   *   post:
-   *     summary: Create a private match room
-   *     tags:
-   *       - Match
-   *     security:
-   *       - BearerAuth: []
-   *     requestBody:
-   *       required: true
-   *       content:
-   *         application/json:
-   *           schema:
-   *             type: object
-   *     responses:
-   *       201:
-   *         description: Match created
-   *         content:
-   *           application/json:
-   *             schema:
-   *               $ref: '#/components/schemas/BaseResponse'
-   *       401:
-   *         description: Unauthorized
-   *       400:
-   *         description: Bad request
-   */
   router.post("/create", authMiddleware, (req, res) => matchController.createPrivateMatch(req, res));
+  router.post("/join", authMiddleware, (req, res) => matchController.joinMatch(req, res));
+  router.get("/active", authMiddleware, (req, res) => matchController.getActiveMatch(req, res));
+  router.get("/:id", authMiddleware, (req, res) => matchController.getMatchState(req, res));
+  router.delete("/:id/leave", authMiddleware, (req, res) => matchController.leaveMatch(req, res));
+  router.patch("/:id/ready", authMiddleware, (req, res) => matchController.setReady(req, res));
+  router.post("/:matchId/start", authMiddleware, (req, res) => matchController.startMatch(req, res));
 
   /**
    * @openapi
