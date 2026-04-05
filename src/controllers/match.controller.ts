@@ -1,9 +1,9 @@
 import { Request, Response } from "express";
 import { IMatchService } from "../service/match.service.interface";
+import { IMatchStateService } from "../service/match-state.service.interface";
+import { IMatchHistoryService } from "../service/match-history.service.interface";
 import { IUserService } from "../service/user.service.interface";
-import { IWaitingQueueService } from "../service/waitingQueue.service.interface";
 import { MatchDocument } from "../model/match";
-import { WaitingQueueDocument } from "../model/waitingQueue";
 import { MatchPlayer } from "../socket/types";
 import { BaseResponse } from "../lib/baseresponse";
 import { SocketService } from "../socket/socket.service";
@@ -12,18 +12,21 @@ import { matchTimers } from "../socket/state";
 export class MatchController {
   private readonly matchService: IMatchService;
   private readonly socketService: SocketService;
-  private readonly waitingQueueService: IWaitingQueueService;
+  private readonly matchStateService: IMatchStateService;
+  private readonly matchHistoryService: IMatchHistoryService;
   private readonly userService: IUserService;
 
   constructor(
     matchService: IMatchService,
     socketService: SocketService,
-    waitingQueueService: IWaitingQueueService,
-    userService: IUserService
+    matchStateService: IMatchStateService,
+    matchHistoryService: IMatchHistoryService,
+    userService: IUserService,
   ) {
     this.matchService = matchService;
     this.socketService = socketService;
-    this.waitingQueueService = waitingQueueService;
+    this.matchStateService = matchStateService;
+    this.matchHistoryService = matchHistoryService;
     this.userService = userService;
   }
 
@@ -106,68 +109,7 @@ export class MatchController {
         return;
       }
 
-      const playerState = await Promise.all(
-        match.players.map(async (p) => {
-          const user = await this.userService.getUserById(p.userId.toString());
-          const displayName = user?.name || user?.username || "Unknown";
-
-          return {
-            userId: p.userId.toString(),
-            displayName,
-            rank: user?.rank ?? 0,
-            health: p.health,
-          };
-        }),
-      );
-
-      const player1Id = match.players[0]?.userId?.toString();
-      const player2Id = match.players[1]?.userId?.toString();
-
-      const player1Revealed: Array<{ x: number; y: number }> = [];
-      const player2Revealed: Array<{ x: number; y: number }> = [];
-      const player1Flags: Array<{ x: number; y: number }> = [];
-      const player2Flags: Array<{ x: number; y: number }> = [];
-
-      (match.moves || []).forEach((move) => {
-        const coord = { x: move.x, y: move.y };
-        if (move.action === "open") {
-          if (move.playerId.toString() === player1Id) {
-            player1Revealed.push(coord);
-          } else if (move.playerId.toString() === player2Id) {
-            player2Revealed.push(coord);
-          }
-        } else if (move.action === "flag") {
-          if (move.playerId.toString() === player1Id) {
-            player1Flags.push(coord);
-          } else if (move.playerId.toString() === player2Id) {
-            player2Flags.push(coord);
-          }
-        }
-      });
-
-      const turnTimeLimit = match.turnTimeLimit ?? 30;
-      let turnStartTime = match.turnStartTime ?? null;
-      let remainingSeconds = null;
-
-      const timer = matchTimers.get(id);
-      if (timer) {
-        remainingSeconds = timer.remainingSeconds;
-        turnStartTime = new Date(Date.now() - (turnTimeLimit - remainingSeconds) * 1000);
-      }
-
-      const payload = {
-        players: playerState,
-        boardState: {
-          player1Revealed,
-          player2Revealed,
-          player1Flags,
-          player2Flags,
-        },
-        currentTurn: match.currentTurn?.toString() ?? null,
-        turnStartTime,
-        turnTimeLimit,
-        remainingSeconds,
-      };
+      const payload = await this.matchStateService.buildMatchStatePayload(match);
 
       const response = new BaseResponse<typeof payload>()
         .setResponse(200)
@@ -179,6 +121,91 @@ export class MatchController {
       res.status(200).json(response);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Unable to get match state";
+      res.status(400).json({ message });
+    }
+  }
+
+  async getMatchHistory(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.userId;
+      if (!userId) {
+        res.status(401).json({ message: "Unauthorized" });
+        return;
+      }
+
+      const page = Number(req.query.page) >= 1 ? Number(req.query.page) : 1;
+      const limit = Number(req.query.limit) >= 1 && Number(req.query.limit) <= 20 ? Number(req.query.limit) : 10;
+
+      const matches = await this.matchService.getMatchHistory(userId, page, limit);
+      const history = this.matchHistoryService.buildMatchHistoryItems(matches, userId);
+
+      const response = new BaseResponse<typeof history>()
+        .setResponse(200)
+        .setMessage("Match history fetched")
+        .setSuccess(true)
+        .setData(history)
+        .build();
+
+      res.status(200).json(response);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unable to get match history";
+      res.status(400).json({ message });
+    }
+  }
+
+  async leaveMatch(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.userId;
+      if (!userId) {
+        res.status(401).json({ message: "Unauthorized" });
+        return;
+      }
+
+      const { id } = req.params;
+      if (!id) {
+        res.status(400).json({ message: "Match id is required" });
+        return;
+      }
+
+      const result = await this.matchService.leaveMatch(id, userId);
+
+      if (!result) {
+        this.socketService.emitToRoom(id, "player_left", { userId });
+
+        const response = new BaseResponse<null>()
+          .setResponse(200)
+          .setMessage("Player left and match deleted")
+          .setSuccess(true)
+          .build();
+
+        res.status(200).json(response);
+        return;
+      }
+
+      this.socketService.emitToRoom(id, "player_left", { userId });
+
+      if (result.hostId?.toString() !== userId) {
+        this.socketService.emitToRoom(id, "host_changed", { hostId: result.hostId?.toString() });
+      }
+
+      const response = new BaseResponse<MatchDocument>()
+        .setResponse(200)
+        .setMessage("Left match successfully")
+        .setSuccess(true)
+        .setData(result)
+        .build();
+
+      res.status(200).json(response);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unable to leave match";
+      if (message === "Match not found") {
+        res.status(404).json({ message });
+        return;
+      }
+      if (message === "Player is not in this match") {
+        res.status(400).json({ message });
+        return;
+      }
       res.status(400).json({ message });
     }
   }
@@ -233,7 +260,7 @@ export class MatchController {
     }
   }
 
-  async findMatch(req: Request, res: Response): Promise<void> {
+  async startMatch(req: Request, res: Response): Promise<void> {
     try {
       const userId = req.userId;
       if (!userId) {
@@ -241,59 +268,47 @@ export class MatchController {
         return;
       }
 
-      const { boardSize } = req.body;
-      if (!boardSize) {
-        res.status(400).json({ message: "boardSize is required" });
+      const { matchId } = req.params;
+      if (!matchId) {
+        res.status(400).json({ message: "matchId is required" });
         return;
       }
 
-      const queueRecord = await this.waitingQueueService.addToQueue(userId, boardSize);
+      const startedMatch = await this.matchService.startMatch(matchId, userId, true);
+      if (!startedMatch) {
+        res.status(404).json({ message: "Match not found" });
+        return;
+      }
 
-      const response = new BaseResponse<WaitingQueueDocument>()
+      const io = this.socketService.getIo();
+      if (io) {
+        const { startMatchTimer } = require("../socket/handlers");
+        io.to(matchId).emit("start_game", {
+          matchId,
+          currentTurn: startedMatch.currentTurn?.toString() ?? null,
+          turnTimeLimit: startedMatch.turnTimeLimit,
+        });
+        startMatchTimer(matchId, io, this.matchService);
+      }
+
+      const response = new BaseResponse<MatchDocument>()
         .setResponse(200)
-        .setMessage("Searching for opponent")
+        .setMessage("Match started")
         .setSuccess(true)
-        .setData(queueRecord)
+        .setData(startedMatch)
         .build();
 
       res.status(200).json(response);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Unable to find match";
+      const message = error instanceof Error ? error.message : "Unable to start match";
+
+      if (message === "Only host can start the match") {
+        res.status(403).json({ message });
+        return;
+      }
+
       res.status(400).json({ message });
     }
   }
 
-  async cancelMatch(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = req.userId;
-      if (!userId) {
-        res.status(401).json({ message: "Unauthorized" });
-        return;
-      }
-
-      const cancelledQueue = await this.waitingQueueService.cancelFromQueue(userId);
-      if (!cancelledQueue) {
-        const response = new BaseResponse<null>()
-          .setResponse(200)
-          .setMessage("No active queue entry to cancel")
-          .setSuccess(false)
-          .build();
-
-        res.status(200).json(response);
-        return;
-      }
-
-      const response = new BaseResponse<WaitingQueueDocument>()
-        .setResponse(200)
-        .setMessage("Search cancelled")
-        .setSuccess(true)
-        .setData(cancelledQueue)
-        .build();
-
-      res.status(200).json(response);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Unable to cancel search";
-      res.status(400).json({ message });
-    }
-  }
 }

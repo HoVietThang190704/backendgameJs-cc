@@ -100,6 +100,37 @@ export function createMatchRoutes(matchController: MatchController): Router {
 
   /**
    * @openapi
+   * /api/matches/{id}/leave:
+   *   delete:
+   *     summary: Leave match room
+   *     tags:
+   *       - Match
+   *     security:
+   *       - BearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: string
+   *     responses:
+   *       200:
+   *         description: Left match successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/BaseResponse'
+   *       401:
+   *         description: Unauthorized
+   *       403:
+   *         description: Forbidden
+   *       404:
+   *         description: Match not found
+   */
+  router.delete("/:id/leave", authMiddleware, (req, res) => matchController.leaveMatch(req, res));
+
+  /**
+   * @openapi
    * /api/matches/{id}/ready:
    *   patch:
    *     summary: Set player ready status
@@ -136,56 +167,33 @@ export function createMatchRoutes(matchController: MatchController): Router {
 
   /**
    * @openapi
-   * /api/matches/find:
+   * /api/matches/{matchId}/start:
    *   post:
-   *     summary: Start searching for an opponent
+   *     summary: Start match and initialize bomb maps
    *     tags:
    *       - Match
    *     security:
    *       - BearerAuth: []
-   *     requestBody:
-   *       required: true
-   *       content:
-   *         application/json:
-   *           schema:
-   *             type: object
-   *             properties:
-   *               boardSize:
-   *                 type: string
-   *                 enum: [small, medium, large]
-   *                 example: "medium"
+   *     parameters:
+   *       - in: path
+   *         name: matchId
+   *         required: true
+   *         schema:
+   *           type: string
    *     responses:
    *       200:
-   *         description: Searching for opponent
+   *         description: Match started
    *       401:
    *         description: Unauthorized
+   *       403:
+   *         description: Forbidden
+   *       404:
+   *         description: Match not found
    *       400:
    *         description: Bad request
    */
-  router.post("/find", authMiddleware, (req, res) => matchController.findMatch(req, res));
+  router.post("/:matchId/start", authMiddleware, (req, res) => matchController.startMatch(req, res));
 
-  /**
-   * @openapi
-   * /api/matches/cancel:
-   *   delete:
-   *     summary: Cancel searching for an opponent
-   *     tags:
-   *       - Match
-   *     security:
-   *       - BearerAuth: []
-   *     responses:
-   *       200:
-   *         description: Search cancelled or no active queue entry
-   *         content:
-   *           application/json:
-   *             schema:
-   *               $ref: '#/components/schemas/BaseResponse'
-   *       401:
-   *         description: Unauthorized
-   *       400:
-   *         description: Bad request
-   */
-  router.delete("/cancel", authMiddleware, (req, res) => matchController.cancelMatch(req, res));
 
   return router;
 }
