@@ -7,12 +7,22 @@ import { MatchPlayer } from "../socket/types";
 import { BaseResponse } from "../lib/baseresponse";
 import { SocketService } from "../socket/socket.service";
 import { startGame, startMatchTimer } from "../socket/handlers";
+import { IUserService } from "../service/user.service.interface";
+import { IWaitingQueueService } from "../service/waitingQueue.service.interface";
+import { MatchDocument } from "../model/match";
+import { WaitingQueueDocument } from "../model/waitingQueue";
+import { MatchPlayer } from "../socket/types";
+import { BaseResponse } from "../lib/baseresponse";
+import { SocketService } from "../socket/socket.service";
+import { matchTimers } from "../socket/state";
 
 export class MatchController {
   private readonly matchService: IMatchService;
   private readonly socketService: SocketService;
   private readonly matchStateService: IMatchStateService;
   private readonly matchHistoryService: IMatchHistoryService;
+  private readonly waitingQueueService: IWaitingQueueService;
+  private readonly userService: IUserService;
 
   constructor(
     matchService: IMatchService,
@@ -24,6 +34,13 @@ export class MatchController {
     this.socketService = socketService;
     this.matchStateService = matchStateService;
     this.matchHistoryService = matchHistoryService;
+    waitingQueueService: IWaitingQueueService,
+    userService: IUserService
+  ) {
+    this.matchService = matchService;
+    this.socketService = socketService;
+    this.waitingQueueService = waitingQueueService;
+    this.userService = userService;
   }
 
   async createPrivateMatch(req: Request, res: Response): Promise<void> {

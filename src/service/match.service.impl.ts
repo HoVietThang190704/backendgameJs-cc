@@ -36,6 +36,11 @@ function normalizeBombCoordinates(
   return Array.from(unique.values());
 }
 
+type BombCoordinate = {
+  x: number;
+  y: number;
+};
+
 function generatePinCode(): string {
   return Math.floor(1000 + Math.random() * 9000).toString();
 }
