@@ -1,3 +1,4 @@
+import { FriendResponseDto } from "../dto/friend.dto";
 import { Friend } from "../model/friend";
 
 export interface IFriendRepository {

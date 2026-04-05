@@ -2,15 +2,8 @@ import { Request, Response } from "express";
 import { IMatchService } from "../service/match.service.interface";
 import { IMatchStateService } from "../service/match-state.service.interface";
 import { IMatchHistoryService } from "../service/match-history.service.interface";
-import { MatchDocument } from "../model/match";
-import { MatchPlayer } from "../socket/types";
-import { BaseResponse } from "../lib/baseresponse";
-import { SocketService } from "../socket/socket.service";
-import { startGame, startMatchTimer } from "../socket/handlers";
 import { IUserService } from "../service/user.service.interface";
-import { IWaitingQueueService } from "../service/waitingQueue.service.interface";
 import { MatchDocument } from "../model/match";
-import { WaitingQueueDocument } from "../model/waitingQueue";
 import { MatchPlayer } from "../socket/types";
 import { BaseResponse } from "../lib/baseresponse";
 import { SocketService } from "../socket/socket.service";
@@ -21,7 +14,6 @@ export class MatchController {
   private readonly socketService: SocketService;
   private readonly matchStateService: IMatchStateService;
   private readonly matchHistoryService: IMatchHistoryService;
-  private readonly waitingQueueService: IWaitingQueueService;
   private readonly userService: IUserService;
 
   constructor(
@@ -29,17 +21,12 @@ export class MatchController {
     socketService: SocketService,
     matchStateService: IMatchStateService,
     matchHistoryService: IMatchHistoryService,
+    userService: IUserService,
   ) {
     this.matchService = matchService;
     this.socketService = socketService;
     this.matchStateService = matchStateService;
     this.matchHistoryService = matchHistoryService;
-    waitingQueueService: IWaitingQueueService,
-    userService: IUserService
-  ) {
-    this.matchService = matchService;
-    this.socketService = socketService;
-    this.waitingQueueService = waitingQueueService;
     this.userService = userService;
   }
 
@@ -166,43 +153,6 @@ export class MatchController {
     }
   }
 
-  async getActiveMatch(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = req.userId;
-      if (!userId) {
-        res.status(401).json({ message: "Unauthorized" });
-        return;
-      }
-
-      const activeMatch = await this.matchService.getActiveMatchForUser(userId);
-      const data = activeMatch
-        ? {
-            matchId: activeMatch._id?.toString() ?? null,
-            status: activeMatch.status,
-            currentPlayerId: activeMatch.currentTurn?.toString() ?? null,
-            playerCount: activeMatch.players.length,
-          }
-        : {
-            matchId: null,
-            status: "none",
-            currentPlayerId: null,
-            playerCount: 0,
-          };
-
-      const response = new BaseResponse<typeof data>()
-        .setResponse(200)
-        .setMessage("Active match fetched")
-        .setSuccess(true)
-        .setData(data)
-        .build();
-
-      res.status(200).json(response);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Unable to get active match";
-      res.status(400).json({ message });
-    }
-  }
-
   async leaveMatch(req: Request, res: Response): Promise<void> {
     try {
       const userId = req.userId;
@@ -291,6 +241,7 @@ export class MatchController {
       if (bothReady && updatedMatch.status === "waiting") {
         const io = this.socketService.getIo();
         if (io) {
+          const { startGame } = require("../socket/handlers"); 
           await startGame(id, updatedMatch, io, this.matchService);
         }
       }
@@ -331,6 +282,7 @@ export class MatchController {
 
       const io = this.socketService.getIo();
       if (io) {
+        const { startMatchTimer } = require("../socket/handlers");
         io.to(matchId).emit("start_game", {
           matchId,
           currentTurn: startedMatch.currentTurn?.toString() ?? null,
@@ -358,4 +310,5 @@ export class MatchController {
       res.status(400).json({ message });
     }
   }
+
 }

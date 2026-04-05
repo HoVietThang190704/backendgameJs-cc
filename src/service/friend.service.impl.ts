@@ -30,8 +30,8 @@ export class FriendService implements IFriendService {
   async getFriends(userId: string): Promise<FriendResponseDto[]> {
     const friendIds = await this.friendRepository.getFriends(userId);
     return friendIds.map((friendId) => ({
-      requesterId: userId as unknown as never,
-      recipientId: friendId as unknown as never,
+      requesterId: userId as any,
+      recipientId: friendId as any,
       status: "accepted",
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -42,8 +42,8 @@ export class FriendService implements IFriendService {
     return this.friendRepository.areFriends(userId, friendId);
   }
 
-  async getFriendConnection(userId: string, friendId: string): Promise<{ requesterId: { toString: () => string } } | null> {
-    return await this.friendRepository.getFriendConnection(userId, friendId) as unknown as { requesterId: { toString: () => string } } | null;
+  async getFriendConnection(userId: string, friendId: string): Promise<any | null> {
+    return this.friendRepository.getFriendConnection(userId, friendId);
   }
 
   async getFriendStatus(userId: string, friendId: string): Promise<"accepted" | "pending" | "rejected" | "blocked" | "not_friends"> {
@@ -79,7 +79,7 @@ export class FriendService implements IFriendService {
   async respondToRequest(
     requesterId: string,
     recipientId: string,
-    status: "accepted" | "rejected" | "blocked",
+    status: "accepted" | "rejected" | "blocked"
   ): Promise<FriendResponseDto> {
     const updated = await this.friendRepository.respondToRequest(requesterId, recipientId, status);
     return updated as unknown as FriendResponseDto;

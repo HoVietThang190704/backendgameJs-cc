@@ -1,7 +1,10 @@
+import { FriendResponseDto } from "../dto/friend.dto";
 import { Friend, FriendModel } from "../model/friend";
 import { IFriendRepository } from "./friend.repository.interface";
 
 export class FriendRepository implements IFriendRepository {
+  constructor() {}
+
   async addFriend(requesterId: string, recipientId: string): Promise<Friend> {
     const addFriend = await FriendModel.create({
       requesterId,
@@ -29,13 +32,14 @@ export class FriendRepository implements IFriendRepository {
       $or: [{ requesterId: userId }, { recipientId: userId }],
       status: "accepted",
     });
-
-    return friends.map((friend) => {
+    const friendIds = friends.map((friend) => {
       if (friend.requesterId.toString() === userId) {
         return friend.recipientId.toString();
+      } else {
+        return friend.requesterId.toString();
       }
-      return friend.requesterId.toString();
     });
+    return friendIds;
   }
 
   async areFriends(userId: string, friendId: string): Promise<boolean> {
@@ -64,14 +68,14 @@ export class FriendRepository implements IFriendRepository {
   }
 
   async respondToRequest(requesterId: string, recipientId: string, status: "accepted" | "rejected" | "blocked"): Promise<Friend> {
-    if (!["accepted", "rejected", "blocked"].includes(status)) {
+    if (!['accepted', 'rejected', 'blocked'].includes(status)) {
       throw new Error("Invalid status");
     }
 
     const updatedFriend = await FriendModel.findOneAndUpdate(
       { requesterId, recipientId, status: "pending" },
       { status },
-      { new: true },
+      { new: true }
     );
 
     if (!updatedFriend) {
