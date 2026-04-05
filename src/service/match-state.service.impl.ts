@@ -6,12 +6,8 @@ import { IMatchStateService } from "./match-state.service.interface";
 export type PlayerState = {
   userId: string;
   displayName: string;
-  avatar: string;
   rank: number;
-  isReady: boolean;
-  playerNumber: number;
   health: number;
-  isHost: boolean;
 };
 
 export type BoardState = {
@@ -22,15 +18,6 @@ export type BoardState = {
 };
 
 export type MatchStatePayload = {
-  matchId: string | null;
-  pinCode: string;
-  status: string;
-  hostId: string;
-  gameBoard: {
-    rows: number;
-    cols: number;
-    bombs: number;
-  };
   players: PlayerState[];
   boardState: BoardState;
   currentTurn: string | null;
@@ -48,19 +35,14 @@ export class MatchStateService implements IMatchStateService {
 
   async buildMatchStatePayload(match: MatchDocument): Promise<MatchStatePayload> {
     const playerState: PlayerState[] = await Promise.all(
-      match.players.map(async (p, index) => {
+      match.players.map(async (p) => {
         const user = await this.userService.getUserById(p.userId.toString());
-        const userWithRank = user as (typeof user & { rank?: number }) | null;
         const displayName = user?.name || user?.username || "Unknown";
         return {
           userId: p.userId.toString(),
           displayName,
-          avatar: user?.avatar_url || "",
-          rank: typeof userWithRank?.rank === "number" ? userWithRank.rank : 0,
-          isReady: p.isReady,
-          playerNumber: index + 1,
+          rank: user?.rank ?? 0,
           health: p.health,
-          isHost: p.userId.toString() === match.hostId?.toString(),
         };
       }),
     );
@@ -74,21 +56,14 @@ export class MatchStateService implements IMatchStateService {
     const player2Flags: Array<{ x: number; y: number }> = [];
 
     (match.moves || []).forEach((move) => {
+      const coord = { x: move.x, y: move.y };
       if (move.action === "open") {
-        const revealedCells = Array.isArray(move.revealedCells) && move.revealedCells.length > 0
-          ? move.revealedCells
-          : [{ x: move.x, y: move.y, adjacentMines: move.result === "bomb" ? -1 : 0 }];
-
-        revealedCells.forEach((cell) => {
-          const coord = { x: cell.x, y: cell.y };
-          if (move.playerId.toString() === player1Id) {
-            player1Revealed.push(coord);
-          } else if (move.playerId.toString() === player2Id) {
-            player2Revealed.push(coord);
-          }
-        });
+        if (move.playerId.toString() === player1Id) {
+          player1Revealed.push(coord);
+        } else if (move.playerId.toString() === player2Id) {
+          player2Revealed.push(coord);
+        }
       } else if (move.action === "flag") {
-        const coord = { x: move.x, y: move.y };
         if (move.playerId.toString() === player1Id) {
           player1Flags.push(coord);
         } else if (move.playerId.toString() === player2Id) {
@@ -108,15 +83,6 @@ export class MatchStateService implements IMatchStateService {
     }
 
     return {
-      matchId: match._id?.toString() ?? null,
-      pinCode: match.pinCode,
-      status: match.status,
-      hostId: match.hostId?.toString() ?? "",
-      gameBoard: {
-        rows: match.gameBoard?.rows ?? 0,
-        cols: match.gameBoard?.cols ?? 0,
-        bombs: match.gameBoard?.bombs ?? 0,
-      },
       players: playerState,
       boardState: {
         player1Revealed,

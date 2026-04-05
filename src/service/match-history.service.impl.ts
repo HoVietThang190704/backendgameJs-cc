@@ -23,11 +23,12 @@ export class MatchHistoryService implements IMatchHistoryService {
       if (userInMatch && opponentInMatch) {
         if (userInMatch.health === 0) result = "lose";
         else if (opponentInMatch.health === 0) result = "win";
+        else result = "draw";
       } else if (userInMatch && !opponentInMatch) {
         result = "win";
       }
 
-      const opponentUser = opponentInMatch?.userId as unknown as { name?: string; username?: string; avatar_url?: string } | undefined;
+      const opponentUser: any = opponentInMatch?.userId;
       const opponentDisplayName = opponentUser?.name || opponentUser?.username || "Unknown";
       const opponentAvatar = opponentUser?.avatar_url || "";
 

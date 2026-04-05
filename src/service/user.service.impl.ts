@@ -26,10 +26,6 @@ export class UserService implements IUserService {
     await this.userRepository.setCurrentMatch(userId, matchId);
   }
 
-  async applyGameResult(userId: string, rankDelta: number, isWin: boolean): Promise<void> {
-    await this.userRepository.applyGameResult(userId, rankDelta, isWin);
-  }
-
   async getTopUsers(limit: number): Promise<User[]> {
     return await this.userRepository.getTopUsers(limit);
   }
@@ -40,9 +36,9 @@ export class UserService implements IUserService {
       return null;
     }
 
-    const higher = await this.userRepository.countUsersWithHigherRank(user.rank ?? 0);
+    const higher = await this.userRepository.countUsersWithHigherRank(user.rank);
     return {
-      rank: user.rank ?? 0,
+      rank: user.rank,
       position: higher + 1,
     };
   }

@@ -1,28 +1,18 @@
 import { Server, Socket } from "socket.io";
 import { IMatchService } from "../service/match.service.interface";
-import { IGameLogicService } from "../service/game-logic.service.interface";
-import { IMatchStateService } from "../service/match-state.service.interface";
 import { MatchDocument } from "../model/match";
 import { socketUsers, disconnectTimers, matchTimers, DEFAULT_TURN_TIME_LIMIT } from "./state";
+import { MatchPlayer } from "./types";
 
-export function registerSocketHandlers(
-  io: Server,
-  socket: Socket,
-  matchService: IMatchService,
-  gameLogicService: IGameLogicService,
-  matchStateService: IMatchStateService,
-) {
+export function registerSocketHandlers(io: Server, socket: Socket, matchService: IMatchService) {
   const userId = socket.data.userId as string;
   const email = socket.data.email as string | undefined;
 
   socketUsers.set(socket.id, { userId, email });
 
-  socket.on("join_room", (payload: { matchId: string }) => handleJoinRoom(io, socket, matchService, matchStateService, payload));
+  socket.on("join_room", (payload: { matchId: string }) => handleJoinRoom(io, socket, matchService, payload));
   socket.on("toggle_ready", (payload: { matchId: string; ready: boolean }) => handleToggleReady(io, socket, matchService, payload));
-  socket.on("place_bombs", (payload: { matchId: string; bombs: Array<{ x: number; y: number }> }) =>
-    handlePlaceBombs(io, socket, matchService, payload));
-  socket.on("send_move", (payload: { matchId: string; x: number; y: number; action: string }) =>
-    handleSendMove(io, socket, matchService, gameLogicService, payload));
+  socket.on("send_move", (payload: { matchId: string; x: number; y: number; action: string }) => handleSendMove(io, socket, matchService, payload));
   socket.on("disconnect", () => handleDisconnect(io, socket, matchService));
 }
 
@@ -30,7 +20,6 @@ async function handleJoinRoom(
   io: Server,
   socket: Socket,
   matchService: IMatchService,
-  matchStateService: IMatchStateService,
   payload: { matchId: string },
 ) {
   const userId = socket.data.userId as string;
@@ -79,9 +68,6 @@ async function handleJoinRoom(
 
     io.to(matchId).emit("ready_update", { players: readyStates });
 
-    const matchState = await matchStateService.buildMatchStatePayload(updatedMatch);
-    socket.emit("match_state", matchState);
-
     const bothReady = updatedMatch.players.length >= 2 && updatedMatch.players.every((p) => p.isReady);
     if (bothReady && updatedMatch.status === "waiting") {
       await startGame(matchId, updatedMatch, io, matchService);
@@ -118,11 +104,6 @@ async function handleToggleReady(
       ready,
     });
 
-    io.to(matchId).emit("ready_update", {
-      userId,
-      ready,
-    });
-
     const bothReady = updatedMatch.players.length >= 2 && updatedMatch.players.every((p) => p.isReady);
     if (bothReady && updatedMatch.status === "waiting") {
       await startGame(matchId, updatedMatch, io, matchService);
@@ -136,7 +117,6 @@ async function handleSendMove(
   io: Server,
   socket: Socket,
   matchService: IMatchService,
-  gameLogicService: IGameLogicService,
   payload: { matchId: string; x: number; y: number; action: string },
 ) {
   const userId = socket.data.userId as string;
@@ -152,86 +132,62 @@ async function handleSendMove(
   }
 
   try {
-    const result = await gameLogicService.applyMove(matchId, userId, x, y, action);
-
-    io.to(matchId).emit("move_result", {
-      userId: result.playerId,
-      x: result.x,
-      y: result.y,
-      action: result.action,
-      result: result.result,
-      health: result.health,
-      revealedCells: result.revealedCells,
-      nextTurn: result.nextTurn,
-      gameOver: result.gameOver,
-      winnerId: result.winnerId,
-    });
-
-    if (result.gameOver) {
-      if (!result.winnerId || !result.loserId) {
-        socket.emit("error", { message: "Unable to resolve match result" });
-        return;
-      }
-
-      const deltas = await matchService.finalizeMatch(matchId, result.winnerId, result.loserId);
-      io.to(matchId).emit("game_over", {
-        winnerId: result.winnerId,
-        loserId: result.loserId,
-        winnerEloDelta: deltas.winnerEloDelta,
-        loserEloDelta: deltas.loserEloDelta,
-      });
-      return;
-    }
-
-    if (result.nextTurn) {
-      io.to(matchId).emit("turn_switched", {
-        currentTurn: result.nextTurn,
-        turnTimeLimit: DEFAULT_TURN_TIME_LIMIT,
-      });
-    }
-  } catch (error) {
-    socket.emit("error", { message: (error as Error).message });
-  }
-}
-
-async function handlePlaceBombs(
-  io: Server,
-  socket: Socket,
-  matchService: IMatchService,
-  payload: { matchId: string; bombs: Array<{ x: number; y: number }> },
-) {
-  const userId = socket.data.userId as string;
-
-  const matchId = payload?.matchId;
-  const bombs = Array.isArray(payload?.bombs) ? payload.bombs : [];
-
-  if (!matchId) {
-    socket.emit("error", { message: "matchId is required" });
-    return;
-  }
-
-  try {
-    const updatedMatch = await matchService.setPlayerBombs(matchId, userId, bombs);
-    if (!updatedMatch) {
+    const match = await matchService.getMatchById(matchId);
+    if (!match) {
       socket.emit("error", { message: "Match not found" });
       return;
     }
 
-    io.to(matchId).emit("bombs_placed", {
-      userId,
-      count: bombs.length,
+    const currentTurn = match.currentTurn?.toString();
+    if (!currentTurn || currentTurn !== userId) {
+      socket.emit("error", { message: "Not your turn" });
+      return;
+    }
+
+    const hitBomb = Math.random() < 0.15;
+    const result = hitBomb ? "bomb" : "safe";
+
+    let updatedPlayers: MatchPlayer[] = match.players.map((p) => ({
+      userId: p.userId,
+      isReady: p.isReady,
+      health: p.health,
+    }));
+
+    if (hitBomb) {
+      updatedPlayers = updatedPlayers.map((p) => {
+        if (p.userId.toString() === userId) {
+          return { ...p, health: Math.max(0, p.health - 1) };
+        }
+        return p;
+      });
+
+      await matchService.updateMatch(matchId, { players: updatedPlayers });
+    }
+
+    await matchService.addMove(matchId, {
+      playerId: userId,
+      x,
+      y,
+      action,
+      result,
     });
 
-    const bothPlayersPlacedBombs =
-      updatedMatch.players.length >= 2 &&
-      Array.isArray(updatedMatch.player1Bombs) &&
-      Array.isArray(updatedMatch.player2Bombs) &&
-      updatedMatch.player1Bombs.length > 0 &&
-      updatedMatch.player2Bombs.length > 0;
+    io.to(matchId).emit("move_result", {
+      userId,
+      x,
+      y,
+      action,
+      result,
+      health: updatedPlayers.find((p) => p.userId.toString() === userId)?.health,
+    });
 
-    if (bothPlayersPlacedBombs && updatedMatch.status === "waiting") {
-      await startGame(matchId, updatedMatch, io, matchService);
+    const player = updatedPlayers.find((p) => p.userId.toString() === userId);
+    if (player?.health === 0) {
+      await endMatch(matchId, userId, io, matchService);
+      return;
     }
+
+    await switchTurn(matchId, io, matchService);
   } catch (error) {
     socket.emit("error", { message: (error as Error).message });
   }
@@ -290,13 +246,10 @@ export async function startGame(
       return;
     }
   } catch {
+    // fallback to existing behavior below
   }
 
   const currentTurn = match.hostId?.toString() || match.players[0]?.userId?.toString();
-  if (!currentTurn) {
-    return;
-  }
-
   await matchService.setMatchStatus(matchId, "playing");
   await matchService.setCurrentTurn(matchId, currentTurn);
 
@@ -349,30 +302,21 @@ async function switchTurn(matchId: string, io: Server, matchService: IMatchServi
   }
 
   await matchService.setCurrentTurn(matchId, nextTurn);
-  io.to(matchId).emit("turn_switched", { currentTurn: nextTurn, turnTimeLimit: DEFAULT_TURN_TIME_LIMIT });
+  io.to(matchId).emit("turn_changed", { nextTurn });
 }
 
 async function endMatch(matchId: string, loserId: string, io: Server, matchService: IMatchService) {
   const match = await matchService.getMatchById(matchId);
   if (!match) return;
 
-  if (match.status === "finished") {
-    return;
-  }
-
   const winner = match.players.find((p) => p.userId.toString() !== loserId);
   const winnerId = winner?.userId.toString();
-  if (!winnerId) {
-    return;
-  }
 
-  const deltas = await matchService.finalizeMatch(matchId, winnerId, loserId);
+  await matchService.setMatchStatus(matchId, "finished");
   stopMatchTimer(matchId);
 
   io.to(matchId).emit("game_over", {
-    winnerId,
+    winnerId: winnerId ?? null,
     loserId,
-    winnerEloDelta: deltas.winnerEloDelta,
-    loserEloDelta: deltas.loserEloDelta,
   });
 }

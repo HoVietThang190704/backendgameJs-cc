@@ -5,13 +5,34 @@ import { authMiddleware } from "../middleware/auth.middleware";
 export function createMatchRoutes(matchController: MatchController): Router {
   const router = Router();
 
+  /**
+   * @openapi
+   * /api/matches/create:
+   *   post:
+   *     summary: Create a private match room
+   *     tags:
+   *       - Match
+   *     security:
+   *       - BearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *     responses:
+   *       201:
+   *         description: Match created
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/BaseResponse'
+   *       401:
+   *         description: Unauthorized
+   *       400:
+   *         description: Bad request
+   */
   router.post("/create", authMiddleware, (req, res) => matchController.createPrivateMatch(req, res));
-  router.post("/join", authMiddleware, (req, res) => matchController.joinMatch(req, res));
-  router.get("/active", authMiddleware, (req, res) => matchController.getActiveMatch(req, res));
-  router.get("/:id", authMiddleware, (req, res) => matchController.getMatchState(req, res));
-  router.delete("/:id/leave", authMiddleware, (req, res) => matchController.leaveMatch(req, res));
-  router.patch("/:id/ready", authMiddleware, (req, res) => matchController.setReady(req, res));
-  router.post("/:matchId/start", authMiddleware, (req, res) => matchController.startMatch(req, res));
 
   /**
    * @openapi
@@ -173,58 +194,6 @@ export function createMatchRoutes(matchController: MatchController): Router {
    */
   router.post("/:matchId/start", authMiddleware, (req, res) => matchController.startMatch(req, res));
 
-  /**
-   * @openapi
-   * /api/matches/find:
-   *   post:
-   *     summary: Start searching for an opponent
-   *     tags:
-   *       - Match
-   *     security:
-   *       - BearerAuth: []
-   *     requestBody:
-   *       required: true
-   *       content:
-   *         application/json:
-   *           schema:
-   *             type: object
-   *             properties:
-   *               boardSize:
-   *                 type: string
-   *                 enum: [small, medium, large]
-   *                 example: "medium"
-   *     responses:
-   *       200:
-   *         description: Searching for opponent
-   *       401:
-   *         description: Unauthorized
-   *       400:
-   *         description: Bad request
-   */
-  router.post("/find", authMiddleware, (req, res) => matchController.findMatch(req, res));
-
-  /**
-   * @openapi
-   * /api/matches/cancel:
-   *   delete:
-   *     summary: Cancel searching for an opponent
-   *     tags:
-   *       - Match
-   *     security:
-   *       - BearerAuth: []
-   *     responses:
-   *       200:
-   *         description: Search cancelled or no active queue entry
-   *         content:
-   *           application/json:
-   *             schema:
-   *               $ref: '#/components/schemas/BaseResponse'
-   *       401:
-   *         description: Unauthorized
-   *       400:
-   *         description: Bad request
-   */
-  router.delete("/cancel", authMiddleware, (req, res) => matchController.cancelMatch(req, res));
 
   return router;
 }
